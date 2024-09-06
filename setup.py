@@ -5,7 +5,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes
 from telegram.ext import ConversationHandler
 from telegram.ext import MessageHandler, ApplicationBuilder
-from telegram.ext.filters import PHOTO
+from telegram.ext.filters import PHOTO, TEXT
 
 from GPT.dependencies.services import get_gpt_service
 from config import config
@@ -34,7 +34,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                                         "получить список возможных блюд - /menu,"
                                         "отменить все в мире - /cancel,"
                                         "удалить все из базы - /delete,"
-                                        "сгенерировать рецепт с помощью gpt - /gpt")
+                                        "сгенерировать рецепт с помощью gpt - /gpt, "
+                                        "сгенерировать рецепт с определенными ингридиентами - /specific")
 
 
 async def receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -53,7 +54,6 @@ async def get_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await context.bot.send_message(chat_id=update.effective_chat.id, text="ща все будет")
 
     products = await qr_service.decode_qr_code(file_path)
-    logger.info(products)
     if not products:
         await context.bot.send_message(chat_id=update.effective_chat.id, text="не нашел ничего")
         return ConversationHandler.END
@@ -64,15 +64,12 @@ async def get_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE,
 
 async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE, recipe_service=get_recipe_service()):
     menu = await recipe_service.get_menu()
-    logger.info(menu)
 
     if not menu:
         await update.effective_message.reply_text("Рецептов не найдено.")
         return ConversationHandler.END
 
     markup = await create_markup(update, context, menu)
-
-    logger.info(markup)
 
     await update.effective_message.reply_text(text="Что будете заказывать?", reply_markup=markup)
     return "asked_food"
@@ -143,6 +140,29 @@ async def get_gpt_recipes(update: Update, context: ContextTypes.DEFAULT_TYPE,
     await context.bot.send_message(chat_id=update.effective_chat.id, text=recipes)
 
 
+async def get_specific_recipes(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_message(chat_id=update.effective_chat.id,
+                                   text="Какие ингредиенты вы хотите видеть в рецепте?")
+    return "asked_ingredients"
+
+
+async def ingredient_selection(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                               recipe_service=get_recipe_service(),
+                               gpt_service=get_gpt_service()):
+    ingredients = update.effective_message.text
+    ingredients_list = [ingredient.strip() for ingredient in ingredients.split(',')]
+    recipes = await recipe_service.get_recipes_by_ingredients(ingredients_list)
+    gpt_recipes = await gpt_service.get_specific_recipes(ingredients=ingredients_list)
+    if recipes:
+        await update.effective_message.reply_text(
+            "Вот рецепты, которые можно приготовить с выбранными ингредиентами:\n" +
+            "\n".join([f"{recipe.title}: {recipe.description}" for recipe in recipes],
+                      )
+        )
+    if gpt_recipes:
+        await update.effective_message.reply_text(text=gpt_recipes)
+
+
 def setup():
     TOKEN = os.environ.get("TOKEN")
 
@@ -168,6 +188,15 @@ def setup():
         fallbacks=[CommandHandler('cancel', cancel)]
     )
     application.add_handler(Menu_handler)
+
+    Specific_receipt_handler = ConversationHandler(
+        entry_points=[CommandHandler('specific', get_specific_recipes)],
+        states={
+            "asked_ingredients": [MessageHandler(filters=TEXT, callback=ingredient_selection)],
+        },
+        fallbacks=[CommandHandler('cancel', cancel)],
+    )
+    application.add_handler(Specific_receipt_handler)
 
     pagination_handler = CallbackQueryHandler(callback=pagination, pattern='^(next_page|prev_page|recipe_)$')
 

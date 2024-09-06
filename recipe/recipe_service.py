@@ -32,3 +32,9 @@ class RecipeService:
                 available_recipes.append(recipe)
 
         return available_recipes
+
+    async def get_recipes_by_ingredients(self, ingredients: list[str]):
+        ingredients = list(map(str.lower, ingredients))
+        recipe = list(filter(lambda x: all([ingredient in map(str.lower, x.ingredients) for ingredient in ingredients]),
+                             await self.recipes.get_all()))
+        return recipe

@@ -11,3 +11,6 @@ class FoodService:
         all_food = await self.foods.get_all()
         for food in all_food:
             await self.foods.delete(food.id)
+
+    async def get_all_food(self):
+        return await self.foods.get_all()
